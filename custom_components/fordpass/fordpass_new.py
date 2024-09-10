@@ -12,7 +12,7 @@ import requests
 
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from.const import REGIONS
+from urllib.parse import urlparse, parse_qs
 
 _LOGGER = logging.getLogger(__name__)
 defaultHeaders = {
@@ -28,20 +28,18 @@ apiHeaders = {
 }
 
 loginHeaders = {
-    "Accept": "application/json, text/javascript, */*; q=0.01",
-    "Accept-Language": "en-US,en;q=0.5",
-    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1",
-    "Accept-Encoding": "gzip, deflate, br",
+    "Accept": "application/json",
+    "User-Agent": "ha/0.0"
 }
 
 NEW_API = True
 
-BASE_URL = "https://usapi.cv.ford.com/api"
-GUARD_URL = "https://api.mps.ford.com/api"
-SSO_URL = "https://sso.ci.ford.com"
-AUTONOMIC_URL = "https://api.autonomic.ai/v1"
-AUTONOMIC_ACCOUNT_URL = "https://accounts.autonomic.ai/v1"
-FORD_LOGIN_URL = "https://login.ford.com"
+BASE_URL = "https://localhost:9800"
+GUARD_URL = "https://localhost:9801"
+SSO_URL = "https://localhost:9802"
+AUTONOMIC_URL = "https://localhost:9803"
+AUTONOMIC_ACCOUNT_URL = "https://localhost:9804"
+FORD_LOGIN_URL = "https://localhost:9805"
 
 session = requests.Session()
 
@@ -50,15 +48,14 @@ class Vehicle:
     # Represents a Ford vehicle, with methods for status and issuing commands
 
     def __init__(
-        self, username, password, vin, region, save_token=False, config_location=""
+        self, client_id, client_secret, vin, _save_token=True, config_location_=""
     ):
-        self.username = username
-        self.password = password
-        self.save_token = save_token
-        self.region = REGIONS[region]["region"]
-        self.country_code = REGIONS[region]["locale"]
-        self.short_code = REGIONS[region]["locale_short"]
-        self.countrycode = REGIONS[region]["countrycode"]
+        self.config_location = ""
+        self.save_token = True
+        self.username = ""
+        self.password = ""
+        self.client_id = client_id
+        self.client_secret = client_secret
         self.vin = vin
         self.token = None
         self.expires = None
@@ -70,28 +67,28 @@ class Vehicle:
         adapter = HTTPAdapter(max_retries=retry)
         session.mount("http://", adapter)
         session.mount("https://", adapter)
-        if config_location == "":
-            self.token_location = "custom_components/fordpass/fordpass_token.txt"
-        else:
-            _LOGGER.debug(config_location)
-            self.token_location = config_location
+        self.token_location = "custom_components/fordpass/" + client_id + "_fordpass_token.txt"
+        self.vehicle_list_location = "custom_components/fordpass/" + client_id + "_vehicle_list.json"
+
+        _LOGGER.debug(self.token_location)
 
     def base64_url_encode(self, data):
         """Encode string to base64"""
         return urlsafe_b64encode(data).rstrip(b'=')
     
-    def generate_tokens(self, urlstring, code_verifier):
-        code_new = urlstring.replace("fordapp://userauthorized/?code=","")
-        print(code_new)
-        print(self.country_code)
-        print(code_verifier)
-        data = {
-            "client_id" : "09852200-05fd-41f6-8c21-d36d3497dc64",
-            "grant_type": "authorization_code",
-            "code_verifier": code_verifier,
-            "code": code_new,
-            "redirect_uri": "fordapp://userauthorized"
+    def generate_tokens(self, urlstring):
+        code_url = urlparse(urlstring).query
 
+        query_string = parse_qs(code_url)
+
+        code_new = query_string['code'][0]
+
+        data = {
+            "client_id" : self.client_id,
+            "client_secret": self.client_secret,
+            "grant_type": "authorization_code",
+            "code": code_new,
+            "redirect_uri": "https://localhost:3000"
         }
 
         _LOGGER.debug(data)
@@ -99,188 +96,64 @@ class Vehicle:
             **loginHeaders,
         }
         req = requests.post(
-                f"{FORD_LOGIN_URL}/4566605f-43a7-400a-946e-89cc9fdb0bd7/B2C_1A_SignInSignUp_{self.country_code}/oauth2/v2.0/token",
+                f"https://dah2vb2cprod.b2clogin.com/914d88b1-3523-4bf6-9be4-1b96b4f6f919/oauth2/v2.0/token?p=B2C_1A_signup_signin_common",
                 headers=headers,
                 data=data,
-                verify=False
+                verify=True
             )
+
         print(req.status_code)
-        print(req.text)
-        return self.generate_fulltokens(req.json())
 
-    def generate_fulltokens(self, token):
-        data = {"idpToken": token["access_token"]}
-        headers = {**apiHeaders, "Application-Id": self.region}
-        response = requests.post(
-            f"{GUARD_URL}/token/v2/cat-with-b2c-access-token",
-            data=json.dumps(data),
-            headers=headers,
-            verify=False
-        )
-        print(response.status_code)
-        print(response.text)
-        final_tokens = response.json()
-        final_tokens["expiry_date"] = time.time() + final_tokens["expires_in"]
+        self.write_token(req.json())
 
-        self.write_token(final_tokens)
         return True
-
-    def generate_hash(self, code):
-        """Generate hash for login"""
-        hashengine = hashlib.sha256()
-        hashengine.update(code.encode('utf-8'))
-        return self.base64_url_encode(hashengine.digest()).decode('utf-8')
-
-    def auth(self):
-        """New Authentication System """
-        _LOGGER.debug("New System")
-        # Auth Step1
-        headers = {
-            **defaultHeaders,
-            'Content-Type': 'application/json',
-        }
-        code1 = ''.join(random.choice(string.ascii_lowercase) for i in range(43))
-        code_verifier = self.generate_hash(code1)
-        url1 = f"{SSO_URL}/v1.0/endpoint/default/authorize?redirect_uri=fordapp://userauthorized&response_type=code&scope=openid&max_age=3600&client_id=9fb503e0-715b-47e8-adfd-ad4b7770f73b&code_challenge={code_verifier}&code_challenge_method=S256"
-        response = session.get(
-            url1,
-            headers=headers,
-        )
-
-        test = re.findall('data-ibm-login-url="(.*)"\s', response.text)[0]
-        next_url = SSO_URL + test
-
-        # Auth Step2
-        headers = {
-            **defaultHeaders,
-            "Content-Type": "application/x-www-form-urlencoded",
-        }
-        data = {
-            "operation": "verify",
-            "login-form-type": "password",
-            "username": self.username,
-            "password": self.password
-
-        }
-        response = session.post(
-            next_url,
-            headers=headers,
-            data=data,
-            allow_redirects=False
-        )
-
-        if response.status_code == 302:
-            next_url = response.headers["Location"]
-        else:
-            response.raise_for_status()
-
-        # Auth Step3
-        headers = {
-            **defaultHeaders,
-            'Content-Type': 'application/json',
-        }
-
-        response = session.get(
-            next_url,
-            headers=headers,
-            allow_redirects=False
-        )
-
-        if response.status_code == 302:
-            next_url = response.headers["Location"]
-            query = requests.utils.urlparse(next_url).query
-            params = dict(x.split('=') for x in query.split('&'))
-            code = params["code"]
-            grant_id = params["grant_id"]
-        else:
-            response.raise_for_status()
-
-        # Auth Step4
-        headers = {
-            **defaultHeaders,
-            "Content-Type": "application/x-www-form-urlencoded",
-        }
-
-        data = {
-            "client_id": "9fb503e0-715b-47e8-adfd-ad4b7770f73b",
-            "grant_type": "authorization_code",
-            "redirect_uri": 'fordapp://userauthorized',
-            "grant_id": grant_id,
-            "code": code,
-            "code_verifier": code1
-        }
-
-        response = session.post(
-            f"{SSO_URL}/oidc/endpoint/default/token",
-            headers=headers,
-            data=data
-
-        )
-
-        if response.status_code == 200:
-            result = response.json()
-            if result["access_token"]:
-                access_token = result["access_token"]
-        else:
-            response.raise_for_status()
-
-        # Auth Step5
-        data = {"ciToken": access_token}
-        headers = {**apiHeaders, "Application-Id": self.region}
-        response = session.post(
-            f"{GUARD_URL}/token/v2/cat-with-ci-access-token",
-            data=json.dumps(data),
-            headers=headers,
-        )
-
-        if response.status_code == 200:
-            result = response.json()
-
-            self.token = result["access_token"]
-            self.refresh_token = result["refresh_token"]
-            self.expires_at = time.time() + result["expires_in"]
-            auto_token = self.get_auto_token()
-            self.auto_token = auto_token["access_token"]
-            self.auto_expires_at = time.time() + result["expires_in"]
-            if self.save_token:
-                result["expiry_date"] = time.time() + result["expires_in"]
-                result["auto_token"] = auto_token["access_token"]
-                result["auto_refresh"] = auto_token["refresh_token"]
-                result["auto_expiry"] = time.time() + auto_token["expires_in"]
-
-                self.write_token(result)
-            session.cookies.clear()
-            return True
-        response.raise_for_status()
-        return False
 
     def refresh_token_func(self, token):
         """Refresh token if still valid"""
-        data = {"refresh_token": token["refresh_token"]}
-        headers = {**apiHeaders, "Application-Id": self.region}
+
+        _LOGGER.info("Refreshing fordpass token")
+
+        data = {
+            "grant_type": "refresh_token",
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "refresh_token": token["refresh_token"]
+        }
+
+        _LOGGER.debug(data)
+
+        headers = {
+            **loginHeaders
+        }
 
         response = session.post(
-            f"{GUARD_URL}/token/v2/cat-with-refresh-token",
-            data=json.dumps(data),
+            f"https://dah2vb2cprod.b2clogin.com/914d88b1-3523-4bf6-9be4-1b96b4f6f919/oauth2/v2.0/token?p=B2C_1A_signup_signin_common",
+            data=data,
             headers=headers,
         )
+
+        _LOGGER.debug(response.status_code)
+        _LOGGER.debug(response.text)
+
         if response.status_code == 200:
             result = response.json()
             if self.save_token:
-                result["expiry_date"] = time.time() + result["expires_in"]
+                result["expiry_date"] = result["expires_on"]
                 self.write_token(result)
+
             self.token = result["access_token"]
             self.refresh_token = result["refresh_token"]
-            self.expires_at = time.time() + result["expires_in"]
+            self.expires_at = result["expires_on"]
+
             _LOGGER.debug("WRITING REFRESH TOKEN")
             return result
         if response.status_code == 401:
             _LOGGER.debug("401 response stage 2: refresh stage 1 token")
-            self.auth()
-
+            response.raise_for_status()
 
 
     def __acquire_token(self):
+
         # Fetch and refresh token as needed
         # If file exists read in token file and check it's valid
         _LOGGER.debug("Fetching token")
@@ -290,58 +163,29 @@ class Vehicle:
                 _LOGGER.debug(data)
                 self.token = data["access_token"]
                 self.refresh_token = data["refresh_token"]
-                self.expires_at = data["expiry_date"]
-                if "auto_token" in data and "auto_expiry" in data:
-                    self.auto_token = data["auto_token"]
-                    self.auto_expires_at = data["auto_expiry"]
-                else:
-                    _LOGGER.debug("AUTO token not set in file")
-                    self.auto_token = None
-                    self.auto_expires_at = None
+                self.expires_at = data["expires_on"]
             else:
                 data = {}
                 data["access_token"] = self.token
                 data["refresh_token"] = self.refresh_token
-                data["expiry_date"] = self.expires_at
-                data["auto_token"] = self.auto_token
-                data["auto_expiry"] = self.auto_expires_at
+                data["expires_on"] = self.expires_at
         else:
             data = {}
             data["access_token"] = self.token
             data["refresh_token"] = self.refresh_token
-            data["expiry_date"] = self.expires_at
-            data["auto_token"] = self.auto_token
-            data["auto_expiry"] = self.auto_expires_at
-        _LOGGER.debug(self.auto_token)
-        _LOGGER.debug(self.auto_expires_at)
-        if self.auto_token is None or self.auto_expires_at is None:
-            result = self.refresh_token_func(data)
-            _LOGGER.debug("Result Above for new TOKEN")
-            self.refresh_auto_token(result)
-        # self.auto_token = data["auto_token"]
-        # self.auto_expires_at = data["auto_expiry"]
+            data["expires_on"] = self.expires_at
+
         if self.expires_at:
             if time.time() >= self.expires_at:
                 _LOGGER.debug("No token, or has expired, requesting new token")
                 self.refresh_token_func(data)
-                # self.auth()
-        if self.auto_expires_at:
-            if time.time() >= self.auto_expires_at:
-                _LOGGER.debug("Autonomic token expired")
-                result = self.refresh_token_func(data)
-                _LOGGER.debug("Result Above for new TOKEN")
-                self.refresh_auto_token(result)
-        if self.token is None:
-            _LOGGER.debug("Fetching token4")
-            # No existing token exists so refreshing library
-            self.auth()
-        else:
-            _LOGGER.debug("Token is valid, continuing")
+
+        _LOGGER.debug("Token is valid, continuing")
 
     def write_token(self, token):
         """Save token to file for reuse"""
         with open(self.token_location, "w", encoding="utf-8") as outfile:
-            token["expiry_date"] = time.time() + token["expires_in"]
+            token["expiry_date"] = token["expires_on"]
             _LOGGER.debug(token)
             json.dump(token, outfile)
 
@@ -353,7 +197,6 @@ class Vehicle:
                 return token
         except ValueError:
             _LOGGER.debug("Fixing malformed token")
-            self.auth()
             with open(self.token_location, encoding="utf-8") as token_file:
                 token = json.load(token_file)
                 return token
@@ -366,127 +209,37 @@ class Vehicle:
             os.remove("/tmp/token.txt")
         if os.path.isfile(self.token_location):
             os.remove(self.token_location)
-    def refresh_auto_token(self, result):
-        auto_token = self.get_auto_token()
-        _LOGGER.debug("AUTO Refresh")
-        self.auto_token = auto_token["access_token"]
-        self.auto_token_refresh = auto_token["refresh_token"]
-        self.auto_expires_at = time.time() + auto_token["expires_in"]
-        if self.save_token:
-            #result["expiry_date"] = time.time() + result["expires_in"]
-            result["auto_token"] = auto_token["access_token"]
-            result["auto_refresh"] = auto_token["refresh_token"]
-            result["auto_expiry"] = time.time() + auto_token["expires_in"]
 
-            self.write_token(result)
-    def get_auto_token(self):
-        """Get token from new autonomic API"""
-        _LOGGER.debug("Getting Auto Token")
-        headers = {
-            "accept": "*/*",
-            "content-type": "application/x-www-form-urlencoded"
-        }
-
-        data = {
-            "subject_token": self.token,
-            "subject_issuer": "fordpass",
-            "client_id": "fordpass-prod",
-            "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
-            "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
-
-        }
-
-        r = session.post(
-            f"{AUTONOMIC_ACCOUNT_URL}/auth/oidc/token",
-            data=data,
-            headers=headers
-        )
-
-        if r.status_code == 200:
-            result = r.json()
-            _LOGGER.debug(r.status_code)
-            _LOGGER.debug(r.text)
-            self.auto_token = result["access_token"]
-            return result
-        return False
 
     def status(self):
         """Get Vehicle status from API"""
 
         self.__acquire_token()
 
-        params = {"lrdt": "01-01-1970 00:00:00"}
+        _LOGGER.debug("Fetch vehicle status")
 
         headers = {
             **apiHeaders,
-            "auth-token": self.token,
-            "Application-Id": self.region,
+            "authorization": f"Bearer {self.token}",
+            "application-id": "AFDC085B-377A-4351-B23E-5E1D35FB3700"
         }
-        _LOGGER.debug(self.auto_token)
 
-        if NEW_API:
-            headers = {
-                **apiHeaders,
-                "authorization": f"Bearer {self.auto_token}",
-                "Application-Id": self.region,
-            }
-            r = session.get(
-                f"{AUTONOMIC_URL}/telemetry/sources/fordpass/vehicles/{self.vin}", params=params, headers=headers
-            )
-            if r.status_code == 200:
-                _LOGGER.debug(r.text)
-                result = r.json()
-                return result
-        else:
-            response = session.get(
-                f"{BASE_URL}/vehicles/v5/{self.vin}/status", params=params, headers=headers
-            )
-            if response.status_code == 200:
-                result = response.json()
-                if result["status"] == 402:
-                    response.raise_for_status()
-                return result["vehiclestatus"]
-            if response.status_code == 401:
-                _LOGGER.debug("401 with status request: start token refresh")
-                data = {}
-                data["access_token"] = self.token
-                data["refresh_token"] = self.refresh_token
-                data["expiry_date"] = self.expires_at
-                self.refresh_token_func(data)
-                self.__acquire_token()
-                headers = {
-                    **apiHeaders,
-                    "auth-token": self.token,
-                    "Application-Id": self.region,
+        r = session.get(f"https://api.mps.ford.com/api/fordconnect/v3/vehicles/{self.vin}", headers=headers)
+
+        if r.status_code == 200:
+            _LOGGER.debug(r.text)
+            result = r.json()
+
+
+            return {
+                **result["vehicle"],
+                "metrics": {
+                   **result["vehicle"]["vehicleStatus"],
+                   **result["vehicle"]["vehicleDetails"]
                 }
-                response = session.get(
-                    f"{BASE_URL}/vehicles/v5/{self.vin}/status",
-                    params=params,
-                    headers=headers,
-                )
-                if response.status_code == 200:
-                    result = response.json()
-                return result["vehiclestatus"]
-            response.raise_for_status()
+            }
 
-    def messages(self):
-        """Get Vehicle messages from API"""
-        self.__acquire_token()
-        headers = {
-            **apiHeaders,
-            "Auth-Token": self.token,
-            "Application-Id": self.region,
-        }
-        response = session.get(f"{GUARD_URL}/messagecenter/v3/messages?", headers=headers)
-        if response.status_code == 200:
-            result = response.json()
-            return result["result"]["messages"]
-            # _LOGGER.debug(result)
-        _LOGGER.debug(response.text)
-        if response.status_code == 401:
-            self.auth()
-        response.raise_for_status()
-        return None
+        r.raise_for_status()
 
     def vehicles(self):
         """Get vehicle list from account"""
@@ -494,49 +247,44 @@ class Vehicle:
 
         headers = {
             **apiHeaders,
-            "Auth-Token": self.token,
-            "Application-Id": self.region,
-            "Countrycode": self.countrycode,
-            "Locale": "EN-US"
+            "application-id": "AFDC085B-377A-4351-B23E-5E1D35FB3700",
+            "authorization": f"Bearer {self.token}"
         }
 
-        data = {
-            "dashboardRefreshRequest": "All"
-        }
-        response = session.post(
-            f"{GUARD_URL}/expdashboard/v1/details/",
-            headers=headers,
-            data=json.dumps(data)
+        _LOGGER.debug(headers)
+
+        response = session.get(
+            "https://api.mps.ford.com/api/fordconnect/v2/vehicles",
+            headers=headers
         )
-        if response.status_code == 207:
+        if response.status_code == 200:
             result = response.json()
-
             _LOGGER.debug(result)
-            return result
+            self.write_cached_vehicle_list(result)
+            return result["vehicles"]
+        if response.status_code == 429:
+            try:
+                cached = self.read_cached_vehicle_list()
+
+                if cached:
+                    return cached
+            except:
+                _LOGGER.debug(response.text)
+                response.raise_for_status()
+
+
+
         _LOGGER.debug(response.text)
-        if response.status_code == 401:
-            self.auth()
         response.raise_for_status()
         return None
 
-    def guard_status(self):
-        """Retrieve guard status from API"""
-        self.__acquire_token()
+    def write_cached_vehicle_list(self, vehicles):
+        with open(self.vehicle_list_location, "w", encoding="utf-8") as outfile:
+            json.dump(vehicles, outfile)
 
-        params = {"lrdt": "01-01-1970 00:00:00"}
-
-        headers = {
-            **apiHeaders,
-            "auth-token": self.token,
-            "Application-Id": self.region,
-        }
-
-        response = session.get(
-            f"{GUARD_URL}/guardmode/v1/{self.vin}/session",
-            params=params,
-            headers=headers,
-        )
-        return response.json()
+    def read_cached_vehicle_list(self):
+        with open(self.vehicle_list_location, "r", encoding="utf-8") as infile:
+            return json.load(infile)["vehicles"]
 
     def start(self):
         """
@@ -562,28 +310,6 @@ class Vehicle:
         """
         return self.__request_and_poll_command("unlock")
 
-    def enable_guard(self):
-        """
-        Enable Guard mode on supported models
-        """
-        self.__acquire_token()
-
-        response = self.__make_request(
-            "PUT", f"{GUARD_URL}/guardmode/v1/{self.vin}/session", None, None
-        )
-        _LOGGER.debug(response.text)
-        return response
-
-    def disable_guard(self):
-        """
-        Disable Guard mode on supported models
-        """
-        self.__acquire_token()
-        response = self.__make_request(
-            "DELETE", f"{GUARD_URL}/guardmode/v1/{self.vin}/session", None, None
-        )
-        _LOGGER.debug(response.text)
-        return response
 
     def request_update(self, vin=""):
         """Send request to vehicle for update"""
@@ -611,6 +337,7 @@ class Vehicle:
         )
 
     def __poll_status(self, url, command_id):
+        return
         """
         Poll the given URL with the given command ID until the command is completed
         """
@@ -627,6 +354,7 @@ class Vehicle:
         return False
 
     def __request_and_poll_command(self, command, vin=None):
+        return
         """Send command to the new Command endpoint"""
         self.__acquire_token()
         headers = {

@@ -32,7 +32,9 @@ vicModel = ""
 verbose = True
 
 def get_autonomic_token(ford_access_token):
-    url = "https://accounts.autonomic.ai/v1/auth/oidc/token"
+    return '';
+
+    url = "https://localhot:9000"
     headers = {
         "accept": "*/*",
         "content-type": "application/x-www-form-urlencoded"
@@ -67,7 +69,8 @@ def get_autonomic_token(ford_access_token):
 
 
 def get_vehicle_status(vin, access_token):
-    BASE_URL = "https://api.autonomic.ai/"
+    return '';
+    BASE_URL = "https://localhost:90001/"
     endpoint = f"v1beta/telemetry/sources/fordpass/vehicles/{vin}:query"
     url = f"{BASE_URL}{endpoint}"
     headers = {

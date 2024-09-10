@@ -67,50 +67,60 @@ class CarSensor(
         self.fordoptions = options
         self._attr = {}
         self.coordinator = coordinator
-        self.units = coordinator.hass.config.units
-        self.data = coordinator.data.get("metrics", {})
-        self.events = coordinator.data.get("events", {})
-        self.states = coordinator.data.get("states", {})
+
+        self.data = self.coordinator.data.get("vehicle", {})
+        self.metrics = self.data.get("metrics", {})
+        self.units = self.coordinator.hass.config.units
+
         self._device_id = "fordpass_" + sensor
         # Required for HA 2022.7
         self.coordinator_context = object()
 
+    def parse_datestr(self, str):
+        return dt.as_local(datetime.strptime(str + " +0000", "%m-%d-%Y %H:%M:%S %z"))
+
     def get_value(self, ftype):
         """Get sensor value and attributes from coordinator data"""
-        self.data = self.coordinator.data.get("metrics", {})
-        self.events = self.coordinator.data.get("events", {})
-        self.states = self.coordinator.data.get("states", {})
+
+        _LOGGER.debug(self.coordinator.data)
+
+        self.data = self.coordinator.data
+        self.metrics = self.data.get("metrics", {})
         self.units = self.coordinator.hass.config.units
+
         if ftype == "state":
             if self.sensor == "odometer":
-                return self.data.get("odometer", {}).get("value")
-                    #return self.data.get("odometer", {}).get("value", {})
+                return self.metrics["odometer"]
             if self.sensor == "fuel":
-                fuel_level = self.data.get("fuelLevel", {}).get("value")
+                fuel_level = self.metrics["fuelLevel"]
+                if fuel_level is None:
+                    fuel_level = self.metrics["batteryChargeLevel"]
+
                 if fuel_level is not None:
-                    return round(fuel_level)
+                    return round(fuel_level["value"])
+
                 battery_soc = self.data.get("xevBatteryStateOfCharge", {}).get("value")
                 if battery_soc is not None:
                     return round(battery_soc)
                 return None
             if self.sensor == "battery":
-                return round(self.data.get("batteryStateOfCharge", {}).get("value", 0))
+                return round(self.status.get("batteryStateOfCharge", {}).get("value", 0))
             if self.sensor == "oil":
-                return round(self.data.get("oilLifeRemaining", {}).get("value", 0))
+                return round(self.status.get("oilLifeRemaining", {}).get("value", 0))
             if self.sensor == "tirePressure":
-                return self.data.get("tirePressureSystemStatus", [{}])[0].get("value", "Unsupported")
+                return self.status.get("tirePressureWarning", [{}])[0].get("value", "Unsupported")
             if self.sensor == "gps":
-                return self.data.get("position", {}).get("value", "Unsupported")
+                return self.status.get("vehicleLocation", {}).get("value", "Unsupported")
             if self.sensor == "alarm":
-                return self.data.get("alarmStatus", {}).get("value", "Unsupported")
+                return self.status.get("alarmStatus", {}).get("value", "Unsupported")
             if self.sensor == "ignitionStatus":
-                return self.data.get("ignitionStatus", {}).get("value", "Unsupported")
+                return self.status.get("ignitionStatus", {}).get("value", "Unsupported")
             if self.sensor == "firmwareUpgInProgress":
-                return self.data.get("firmwareUpgradeInProgress", {}).get("value", "Unsupported")
+                return self.status.get("firmwareUpgradeInProgress", {}).get("value", "Unsupported")
             if self.sensor == "deepSleepInProgress":
-                return self.data.get("deepSleepInProgress", {}).get("value", "Unsupported")
+                return self.status.get("deepSleepInProgress", {}).get("value", "Unsupported")
             if self.sensor == "doorStatus":
-                for value in self.data.get("doorStatus", []):
+                for value in self.status.get("doorStatus", []):
                     if value["value"] in ["CLOSED", "Invalid", "UNKNOWN"]:
                         continue
                     return "Open"
@@ -124,7 +134,8 @@ class CarSensor(
                         return "Open"
                 return "Closed"
             if self.sensor == "lastRefresh":
-                return dt.as_local(dt.parse_datetime(self.coordinator.data.get("updateTime", 0)))
+                _LOGGER.debug(self.data.get("lastUpdated", 0))
+                return self.parse_datestr(self.data.get("lastUpdated", ""))
             if self.sensor == "elVeh" and "xevBatteryRange" in self.data:
                 return round(self.data.get("xevBatteryRange", {}).get("value"), 2)
             # SquidBytes: Added elVehCharging

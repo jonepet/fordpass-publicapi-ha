@@ -6,7 +6,6 @@ from datetime import timedelta
 import async_timeout
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.update_coordinator import (
@@ -47,23 +46,23 @@ async def async_setup(hass: HomeAssistant, config: dict):
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Set up FordPass from a config entry."""
-    user = entry.data[CONF_USERNAME]
-    password = entry.data[CONF_PASSWORD]
+    client_id = entry.data["client_id"]
+    client_secret = entry.data["client_secret"]
     vin = entry.data[VIN]
+
     if UPDATE_INTERVAL in entry.options:
         update_interval = entry.options[UPDATE_INTERVAL]
     else:
         update_interval = UPDATE_INTERVAL_DEFAULT
+
     _LOGGER.debug(update_interval)
+
     for ar_entry in entry.data:
         _LOGGER.debug(ar_entry)
-    if REGION in entry.data.keys():
-        _LOGGER.debug(entry.data[REGION])
-        region = entry.data[REGION]
-    else:
-        _LOGGER.debug("CANT GET REGION")
-        region = DEFAULT_REGION
-    coordinator = FordPassDataUpdateCoordinator(hass, user, password, vin, region, update_interval, 1)
+
+    _LOGGER.debug("Client id " + client_id)
+
+    coordinator = FordPassDataUpdateCoordinator(hass, client_id, client_secret, vin, update_interval, 1)
 
     await coordinator.async_refresh()  # Get initial data
 
@@ -179,12 +178,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 class FordPassDataUpdateCoordinator(DataUpdateCoordinator):
     """DataUpdateCoordinator to handle fetching new data about the vehicle."""
 
-    def __init__(self, hass, user, password, vin, region, update_interval, save_token=False):
+    def __init__(self, hass, client_id, client_secret, vin, update_interval, save_token=False):
         """Initialize the coordinator and set up the Vehicle object."""
         self._hass = hass
         self.vin = vin
-        config_path = hass.config.path("custom_components/fordpass/" + user + "_fordpass_token.txt")
-        self.vehicle = Vehicle(user, password, vin, region, save_token, config_path)
+        config_path = hass.config.path("custom_components/fordpass/" + client_id + "_fordpass_token.txt")
+        self.vehicle = Vehicle(client_id, client_secret, vin, save_token, config_path)
         self._available = True
 
         super().__init__(
@@ -198,21 +197,13 @@ class FordPassDataUpdateCoordinator(DataUpdateCoordinator):
         """Fetch data from FordPass."""
         try:
             async with async_timeout.timeout(30):
-                data = await self._hass.async_add_executor_job(
+                data = (await self._hass.async_add_executor_job(
                     self.vehicle.status  # Fetch new status
-                )
+                ))
 
-                # Temporarily removed due to Ford backend API changes
-                # data["guardstatus"] = await self._hass.async_add_executor_job(
-                #    self.vehicle.guardStatus  # Fetch new status
-                # )
+                if not data:
+                    data = {}
 
-                data["messages"] = await self._hass.async_add_executor_job(
-                    self.vehicle.messages
-                )
-                data["vehicles"] = await self._hass.async_add_executor_job(
-                    self.vehicle.vehicles
-                )
                 _LOGGER.debug(data)
                 # If data has now been fetched but was previously unavailable, log and reset
                 if not self._available:
@@ -224,6 +215,7 @@ class FordPassDataUpdateCoordinator(DataUpdateCoordinator):
             self._available = False  # Mark as unavailable
             _LOGGER.warning(str(ex))
             _LOGGER.warning("Error communicating with FordPass for %s", self.vin)
+            _LOGGER.exception(ex)
             raise UpdateFailed(
                 f"Error communicating with FordPass for {self.vin}"
             ) from ex
@@ -256,11 +248,12 @@ class FordPassEntity(CoordinatorEntity):
         if self._device_id is None:
             return None
 
+        _LOGGER.debug(self.coordinator.data)
         model = "unknown"
-        if self.coordinator.data["vehicles"] is not None:
-            for vehicle in self.coordinator.data["vehicles"]["vehicleProfile"]:
-                if vehicle["VIN"] == self.coordinator.vin:
-                    model = f"{vehicle['year']} {vehicle['model']}"
+        if self.coordinator.data is not None:
+            vehicle = self.coordinator.data
+            if vehicle["vehicleId"] == self.coordinator.vin:
+                model = f"{vehicle['modelYear']} {vehicle['modelName']}"
 
         return {
             "identifiers": {(DOMAIN, self.coordinator.vin)},

@@ -21,7 +21,6 @@ from .const import (  # pylint:disable=unused-import
     PRESSURE_UNITS,
     REGION,
     REGION_OPTIONS,
-    REGIONS,
     VIN,
     UPDATE_INTERVAL,
     UPDATE_INTERVAL_DEFAULT,
@@ -35,7 +34,8 @@ _LOGGER = logging.getLogger(__name__)
 DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_USERNAME): str,
-        #vol.Required(CONF_PASSWORD): str,
+        vol.Required("client_id"): str,
+        vol.Required("client_secret"): str,
         vol.Required(REGION): vol.In(REGION_OPTIONS),
     }
 )
@@ -58,13 +58,12 @@ def configured_vehicles(hass):
 
 async def validate_token(hass: core.HomeAssistant, data):
     _LOGGER.debug(data)
-    configPath = hass.config.path("custom_components/fordpass/" + data["username"] + "_fordpass_token.txt")
+    configPath = hass.config.path("custom_components/fordpass/" + data["client_id"] + "_fordpass_token.txt")
     _LOGGER.debug(configPath)
-    vehicle = Vehicle(data["username"], "", "", data["region"], 1, configPath)
+    vehicle = Vehicle(data["client_id"], data["client_secret"], "", True, configPath)
     results = await hass.async_add_executor_job(
         vehicle.generate_tokens,
-        data["tokenstr"],
-        data["code_verifier"]
+        data["tokenstr"]
         )
 
     if results:
@@ -83,7 +82,6 @@ async def validate_input(hass: core.HomeAssistant, data):
 
     Data has the keys from DATA_SCHEMA with values provided by the user.
     """
-    _LOGGER.debug(data[REGION])
     configPath = hass.config.path("custom_components/fordpass/" + data[CONF_USERNAME] + "_fordpass_token.txt")
     vehicle = Vehicle(data[CONF_USERNAME], data[CONF_PASSWORD], "", data[REGION], 1, configPath)
 
@@ -97,29 +95,18 @@ async def validate_input(hass: core.HomeAssistant, data):
             vehicles = await(hass.async_add_executor_job(vehicle.vehicles))
     except Exception as ex:
         vehicles = None
-    #except Exception as ex:
-    #    raise InvalidAuth from ex
 
-    #result3 = await hass.async_add_executor_job(vehicle.vehicles)
-    # Disabled due to API change
-    #vinfound = False
-    #for car in result3:
-    #    if car["vin"] == data[VIN]:
-    #        vinfound = True
-    #if vinfound == False:
-    #    _LOGGER.debug("Vin not found in account, Is your VIN valid?")
     if not result:
         _LOGGER.error("Failed to authenticate with fordpass")
         raise CannotConnect
 
     # Return info that you want to store in the config entry.
     return vehicles
-    #return {"title": f"Vehicle ({data[VIN]})"}
 
 async def validate_vin(hass: core.HomeAssistant, data):
     configPath = hass.config.path("custom_components/fordpass/" + data[CONF_USERNAME] + "_fordpass_token.txt")
 
-    vehicle = Vehicle(data[CONF_USERNAME], data[CONF_PASSWORD], data[VIN], data[REGION], 1, configPath)
+    vehicle = Vehicle(data[CONF_USERNAME], data[CONF_PASSWORD], data[VIN], "", 1, configPath)
     test = await(hass.async_add_executor_job(vehicle.get_status))
     _LOGGER.debug("GOT SOMETHING BACK?")
     _LOGGER.debug(test)
@@ -135,38 +122,36 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
     CONNECTION_CLASS = config_entries.CONN_CLASS_CLOUD_POLL
-    region = None
-    username = None
+    client_secret = None
+    client_id = None
     login_input = {}
 
     async def async_step_user(self, user_input=None):
         errors = {}
         if user_input is not None:
             try:
-                _LOGGER.debug(user_input[REGION])
-                self.region = user_input[REGION]
-                self.username = user_input[CONF_USERNAME]
+                self.client_id = user_input['client_id']
+                self.client_secret = user_input['client_secret']
 
                 return await self.async_step_token(None)
             except CannotConnect:
                 print("EXCEPT")
                 errors["base"] = "cannot_connect"
-        
+
         return self.async_show_form(
             step_id="user", data_schema=DATA_SCHEMA, errors=errors
         )
-    
+
     async def async_step_token(self, user_input=None):
         errors = {}
-        
+
         if user_input is not None:
             try:
                 token = user_input["tokenstr"]
+
                 if self.check_token(token):
-                    user_input["region"] = self.region
-                    user_input["username"] = self.username
-                    user_input["password"] = ""
-                    user_input["code_verifier"] = self.login_input["code_verifier"]
+                    user_input["client_id"] = self.client_id
+                    user_input["client_secret"] = self.client_secret
                     _LOGGER.debug(user_input)
                     info = await validate_token(self.hass, user_input)
                     self.login_input = user_input
@@ -174,48 +159,38 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         self.vehicles = None
                         _LOGGER.debug("NO VEHICLES FOUND")
                     else:
-                        self.vehicles = info["userVehicles"]["vehicleDetails"]
+                        self.vehicles = info
+
                     if self.vehicles is None:
                         return await self.async_step_vin()
+
                     return await self.async_step_vehicle()
-                    
+
                 else:
                     errors["base"] = "invalid_token"
-                
+
             except CannotConnect:
                 print("EXCEPT")
                 errors["base"] = "cannot_connect"
 
-        if self.region is not None:
-            _LOGGER.debug("Region")
-            _LOGGER.debug(self.region)
+        if self.client_id is not None:
             return self.async_show_form(
                 step_id="token", data_schema=
                     vol.Schema(
                     {
-                        vol.Optional("url", default=self.generate_url(self.region)): str,
                         vol.Required("tokenstr"): str,
                     }
                     )
                 , errors=errors
             )
-        
+
     def check_token(self, token):
-        if "fordapp://userauthorized/?code=" in token:
+        if "https://localhost:3000/?state=123&code=" in token:
             return True
         return False
     
 
 
-    def generate_url(self, region):
-        _LOGGER.debug(REGIONS[region])
-        code1 = ''.join(random.choice(string.ascii_lowercase) for i in range(43))
-        code_verifier = self.generate_hash(code1)
-        self.login_input["code_verifier"] = code1
-        
-        url = f"{REGIONS[region]["locale_url"]}/4566605f-43a7-400a-946e-89cc9fdb0bd7/B2C_1A_SignInSignUp_{REGIONS[region]["locale"]}/oauth2/v2.0/authorize?redirect_uri=fordapp://userauthorized&response_type=code&max_age=3600&code_challenge={code_verifier}&code_challenge_method=S256&scope=%2009852200-05fd-41f6-8c21-d36d3497dc64%20openid&client_id=09852200-05fd-41f6-8c21-d36d3497dc64&ui_locales={REGIONS[region]["locale"]}&language_code={REGIONS[region]["locale"]}&country_code={REGIONS[region]["locale_short"]}&ford_application_id={REGIONS[region]["region"]}"
-        
-        return url
     def base64_url_encode(self, data):
         """Encode string to base64"""
         return urlsafe_b64encode(data).rstrip(b'=')
@@ -267,15 +242,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         avaliable_vehicles = {}
         for vehicle in self.vehicles:
             _LOGGER.debug(vehicle)
-            if vehicle["VIN"] not in configured:
+            if vehicle["vehicleId"] not in configured:
                 if "nickName" in vehicle:
-                    avaliable_vehicles[vehicle["VIN"]] = vehicle["nickName"] + f" ({vehicle['VIN']})"
+                    avaliable_vehicles[vehicle["vehicleId"]] = vehicle["nickName"] + f" ({vehicle['vehicleId']})"
                 else:
-                    avaliable_vehicles[vehicle["VIN"]] = f" ({vehicle['VIN']})"
+                    avaliable_vehicles[vehicle["vehicleId"]] = f" ({vehicle['vehicleId']})"
 
         if not avaliable_vehicles:
             _LOGGER.debug("No Vehicles?")
             return self.async_abort(reason="no_vehicles")
+
         return self.async_show_form(
             step_id="vehicle",
             data_schema = vol.Schema(
