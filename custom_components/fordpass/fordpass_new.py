@@ -1,4 +1,7 @@
 """Fordpass API Library"""
+from os import mkdir
+from sys import exception
+
 import hashlib
 import json
 import logging
@@ -6,9 +9,11 @@ import os
 import random
 import re
 import string
+import hashlib
 import time
 from base64 import urlsafe_b64encode
 import requests
+from pathlib import Path
 
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -68,7 +73,7 @@ class Vehicle:
         session.mount("http://", adapter)
         session.mount("https://", adapter)
         self.token_location = "custom_components/fordpass/" + client_id + "_fordpass_token.txt"
-        self.vehicle_list_location = "custom_components/fordpass/" + client_id + "_vehicle_list.json"
+        self.cache_location = ".fordpass-cache/" + client_id + "/"
 
         _LOGGER.debug(self.token_location)
 
@@ -91,7 +96,6 @@ class Vehicle:
             "redirect_uri": "https://localhost:3000"
         }
 
-        _LOGGER.debug(data)
         headers = {
             **loginHeaders,
         }
@@ -101,8 +105,6 @@ class Vehicle:
                 data=data,
                 verify=True
             )
-
-        print(req.status_code)
 
         self.write_token(req.json())
 
@@ -120,8 +122,6 @@ class Vehicle:
             "refresh_token": token["refresh_token"]
         }
 
-        _LOGGER.debug(data)
-
         headers = {
             **loginHeaders
         }
@@ -131,9 +131,6 @@ class Vehicle:
             data=data,
             headers=headers,
         )
-
-        _LOGGER.debug(response.status_code)
-        _LOGGER.debug(response.text)
 
         if response.status_code == 200:
             result = response.json()
@@ -160,7 +157,6 @@ class Vehicle:
         if self.save_token:
             if os.path.isfile(self.token_location):
                 data = self.read_token()
-                _LOGGER.debug(data)
                 self.token = data["access_token"]
                 self.refresh_token = data["refresh_token"]
                 self.expires_at = data["expires_on"]
@@ -186,7 +182,6 @@ class Vehicle:
         """Save token to file for reuse"""
         with open(self.token_location, "w", encoding="utf-8") as outfile:
             token["expiry_date"] = token["expires_on"]
-            _LOGGER.debug(token)
             json.dump(token, outfile)
 
     def read_token(self):
@@ -214,24 +209,13 @@ class Vehicle:
     def status(self):
         """Get Vehicle status from API"""
 
-        self.__acquire_token()
-
         _LOGGER.debug("Fetch vehicle status")
 
-        headers = {
-            **apiHeaders,
-            "authorization": f"Bearer {self.token}",
-            "application-id": "AFDC085B-377A-4351-B23E-5E1D35FB3700"
-        }
+        result = self.get_json_with_cache(f"https://api.mps.ford.com/api/fordconnect/v3/vehicles/{self.vin}")
 
-        r = session.get(f"https://api.mps.ford.com/api/fordconnect/v3/vehicles/{self.vin}", headers=headers)
+        if result:
 
-        if r.status_code == 200:
-            _LOGGER.debug(r.text)
-            result = r.json()
-
-
-            return {
+            v = {
                 **result["vehicle"],
                 "metrics": {
                    **result["vehicle"]["vehicleStatus"],
@@ -239,10 +223,11 @@ class Vehicle:
                 }
             }
 
-        r.raise_for_status()
+            return v
 
-    def vehicles(self):
-        """Get vehicle list from account"""
+        raise exception("No result from v3 vehicle fetch, and no cached result available")
+
+    def get_json_with_cache(self, url):
         self.__acquire_token()
 
         headers = {
@@ -251,40 +236,70 @@ class Vehicle:
             "authorization": f"Bearer {self.token}"
         }
 
-        _LOGGER.debug(headers)
+        try:
+            cached = self.read_json_cache(url)
+        except:
+            cached = None
 
         response = session.get(
-            "https://api.mps.ford.com/api/fordconnect/v2/vehicles",
+            url,
             headers=headers
         )
-        if response.status_code == 200:
-            result = response.json()
-            _LOGGER.debug(result)
-            self.write_cached_vehicle_list(result)
-            return result["vehicles"]
-        if response.status_code == 429:
-            try:
-                cached = self.read_cached_vehicle_list()
 
-                if cached:
-                    return cached
-            except:
-                _LOGGER.debug(response.text)
+        if 200 <= response.status_code < 300:
+
+            json_response = response.json()
+
+            if json_response:
+                try:
+                    self.write_json_cache(url, json_response)
+                except:
+                    """Ignore"""
+
+                return json_response
+
+        if response.status_code == 429:
+            if not cached:
                 response.raise_for_status()
 
+            return cached
 
-
-        _LOGGER.debug(response.text)
         response.raise_for_status()
-        return None
 
-    def write_cached_vehicle_list(self, vehicles):
-        with open(self.vehicle_list_location, "w", encoding="utf-8") as outfile:
-            json.dump(vehicles, outfile)
+    def vehicles(self):
+        """Get vehicle list from account"""
 
-    def read_cached_vehicle_list(self):
-        with open(self.vehicle_list_location, "r", encoding="utf-8") as infile:
-            return json.load(infile)["vehicles"]
+        response = self.get_json_with_cache("https://api.mps.ford.com/api/fordconnect/v2/vehicles")
+        return response["vehicles"]
+
+    def get_json_cache_filename(self, url):
+
+        urlhash = hashlib.sha1()
+        urlhash.update(url.encode())
+        urlhash_string = urlhash.hexdigest()
+
+        return os.path.join(self.cache_location, urlhash_string + ".json")
+
+    def write_json_cache(self, url, jsondata):
+
+        cachePath = Path(self.cache_location)
+        cachePath.mkdir(exist_ok=True, parents=True)
+
+        filename = self.get_json_cache_filename(url)
+        _LOGGER.debug("Write to cache file " + filename)
+
+        with open(filename, "w", encoding="utf-8") as outfile:
+            json.dump(jsondata, outfile)
+
+    def read_json_cache(self, url):
+        filename = self.get_json_cache_filename(url)
+
+        _LOGGER.debug("Reading cached json from " + filename)
+
+        with open(filename, "r", encoding="utf-8") as infile:
+            data = json.load(infile)
+
+        return data
 
     def start(self):
         """

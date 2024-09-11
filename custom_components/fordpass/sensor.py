@@ -90,37 +90,48 @@ class CarSensor(
 
         if ftype == "state":
             if self.sensor == "odometer":
-                return self.metrics["odometer"]
+                odometer = self.metrics.get("odometer", None)
+                _LOGGER.debug(odometer);
+
+                if odometer is not None:
+                    return round(odometer)
+
+                return None
+
             if self.sensor == "fuel":
-                fuel_level = self.metrics["fuelLevel"]
-                if fuel_level is None:
-                    fuel_level = self.metrics["batteryChargeLevel"]
+                fuel_level = self.metrics.get("fuelLevel", None)
 
                 if fuel_level is not None:
-                    return round(fuel_level["value"])
+                    return round(fuel_level.get("value", 0))
 
-                battery_soc = self.data.get("xevBatteryStateOfCharge", {}).get("value")
-                if battery_soc is not None:
-                    return round(battery_soc)
                 return None
+
+            if self.sensor == "hvBattery":
+                soc = self.metrics.get("batteryChargeLevel", None)
+
+                if soc is not None:
+                    return round(soc.get("value", 0))
+
+                return None
+
             if self.sensor == "battery":
                 return round(self.status.get("batteryStateOfCharge", {}).get("value", 0))
             if self.sensor == "oil":
                 return round(self.status.get("oilLifeRemaining", {}).get("value", 0))
             if self.sensor == "tirePressure":
-                return self.status.get("tirePressureWarning", [{}])[0].get("value", "Unsupported")
+                return self.metrics.get("tirePressureWarning", [{}])[0].get("value", "Unsupported")
             if self.sensor == "gps":
-                return self.status.get("vehicleLocation", {}).get("value", "Unsupported")
+                return self.metrics.get("vehicleLocation", {}).get("value", "Unsupported")
             if self.sensor == "alarm":
-                return self.status.get("alarmStatus", {}).get("value", "Unsupported")
+                return self.metrics.get("alarmStatus", {}).get("value", "Unsupported")
             if self.sensor == "ignitionStatus":
-                return self.status.get("ignitionStatus", {}).get("value", "Unsupported")
+                return self.metrics.get("ignitionStatus", {}).get("value", "Unsupported")
             if self.sensor == "firmwareUpgInProgress":
-                return self.status.get("firmwareUpgradeInProgress", {}).get("value", "Unsupported")
+                return self.metrics.get("firmwareUpgradeInProgress", {}).get("value", "Unsupported")
             if self.sensor == "deepSleepInProgress":
-                return self.status.get("deepSleepInProgress", {}).get("value", "Unsupported")
+                return self.metrics.get("deepSleepInProgress", {}).get("value", "Unsupported")
             if self.sensor == "doorStatus":
-                for value in self.status.get("doorStatus", []):
+                for value in self.metrics.get("doorStatus", []):
                     if value["value"] in ["CLOSED", "Invalid", "UNKNOWN"]:
                         continue
                     return "Open"
@@ -134,7 +145,6 @@ class CarSensor(
                         return "Open"
                 return "Closed"
             if self.sensor == "lastRefresh":
-                _LOGGER.debug(self.data.get("lastUpdated", 0))
                 return self.parse_datestr(self.data.get("lastUpdated", ""))
             if self.sensor == "elVeh" and "xevBatteryRange" in self.data:
                 return round(self.data.get("xevBatteryRange", {}).get("value"), 2)
@@ -184,7 +194,7 @@ class CarSensor(
             return SENSORS.get(self.sensor, {}).get("measurement", None)
         if ftype == "attribute":
             if self.sensor == "odometer":
-                return self.data.get("odometer", {})
+                return {}
             if self.sensor == "outsideTemp":
                 ambient_temp = self.data.get("ambientTemp", {}).get("value")
                 if ambient_temp is not None:

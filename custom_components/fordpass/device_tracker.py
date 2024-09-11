@@ -15,7 +15,9 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     entry = hass.data[DOMAIN][config_entry.entry_id][COORDINATOR]
 
     # Added a check to see if the car supports GPS
-    if "position" in entry.data["metrics"] and entry.data["metrics"]["position"] is not None:
+    _LOGGER.debug("START GPS")
+    _LOGGER.debug(entry.data["vehicleLocation"])
+    if "vehicleLocation" in entry.data and entry.data["vehicleLocation"] is not None:
         async_add_entities([CarTracker(entry, "gps")], True)
     else:
         _LOGGER.debug("Vehicle does not support GPS")
@@ -35,12 +37,12 @@ class CarTracker(FordPassEntity, TrackerEntity):
     @property
     def latitude(self):
         """Return latitude"""
-        return float(self.coordinator.data["metrics"]["position"]["value"]["location"]["lat"])
+        return float(self.coordinator.data["vehicleLocation"]["latitude"])
 
     @property
     def longitude(self):
         """Return longtitude"""
-        return float(self.coordinator.data["metrics"]["position"]["value"]["location"]["lon"])
+        return float(self.coordinator.data["vehicleLocation"]["longitude"])
 
     @property
     def source_type(self):
@@ -59,13 +61,11 @@ class CarTracker(FordPassEntity, TrackerEntity):
 
     @property
     def extra_state_attributes(self):
-        atts = {}
-        if "alt" in self.coordinator.data["metrics"]["position"]["value"]["location"]:
-            atts["Altitude"] = self.coordinator.data["metrics"]["position"]["value"]["location"]["alt"]
-        if "gpsCoordinateMethod" in self.coordinator.data["metrics"]["position"]["value"]:
-            atts["gpsCoordinateMethod"] = self.coordinator.data["metrics"]["position"]["value"]["gpsCoordinateMethod"]
-        if "gpsDimension" in self.coordinator.data["metrics"]["position"]["value"]:
-            atts["gpsDimension"] = self.coordinator.data["metrics"]["position"]["value"]["gpsDimension"]
+        atts = {
+            "direction": self.coordinator.data["vehicleLocation"]["direction"],
+            "speed": self.coordinator.data["vehicleLocation"]["speed"],
+            "timestamp": self.coordinator.data["vehicleLocation"]["timeStamp"],
+        }
         return atts
 
     @property
