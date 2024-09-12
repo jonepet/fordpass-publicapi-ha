@@ -19,8 +19,6 @@ from .const import (  # pylint:disable=unused-import
     DISTANCE_UNITS,
     DOMAIN,
     PRESSURE_UNITS,
-    REGION,
-    REGION_OPTIONS,
     VIN,
     UPDATE_INTERVAL,
     UPDATE_INTERVAL_DEFAULT,
@@ -33,10 +31,8 @@ _LOGGER = logging.getLogger(__name__)
 
 DATA_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_USERNAME): str,
         vol.Required("client_id"): str,
-        vol.Required("client_secret"): str,
-        vol.Required(REGION): vol.In(REGION_OPTIONS),
+        vol.Required("client_secret"): str
     }
 )
 
@@ -57,10 +53,7 @@ def configured_vehicles(hass):
     }
 
 async def validate_token(hass: core.HomeAssistant, data):
-    _LOGGER.debug(data)
-    configPath = hass.config.path("custom_components/fordpass/" + data["client_id"] + "_fordpass_token.txt")
-    _LOGGER.debug(configPath)
-    vehicle = Vehicle(data["client_id"], data["client_secret"], "", True, configPath)
+    vehicle = Vehicle(data["client_id"], data["client_secret"], "")
     results = await hass.async_add_executor_job(
         vehicle.generate_tokens,
         data["tokenstr"]
@@ -72,41 +65,8 @@ async def validate_token(hass: core.HomeAssistant, data):
         _LOGGER.debug(vehicles)
         return vehicles
 
-    
-
-
-
-
-async def validate_input(hass: core.HomeAssistant, data):
-    """Validate the user input allows us to connect.
-
-    Data has the keys from DATA_SCHEMA with values provided by the user.
-    """
-    configPath = hass.config.path("custom_components/fordpass/" + data[CONF_USERNAME] + "_fordpass_token.txt")
-    vehicle = Vehicle(data[CONF_USERNAME], data[CONF_PASSWORD], "", data[REGION], 1, configPath)
-
-    try:
-        result = await hass.async_add_executor_job(vehicle.auth)
-        _LOGGER.debug
-    except Exception as ex:
-        raise InvalidAuth from ex
-    try:
-        if result:
-            vehicles = await(hass.async_add_executor_job(vehicle.vehicles))
-    except Exception as ex:
-        vehicles = None
-
-    if not result:
-        _LOGGER.error("Failed to authenticate with fordpass")
-        raise CannotConnect
-
-    # Return info that you want to store in the config entry.
-    return vehicles
-
 async def validate_vin(hass: core.HomeAssistant, data):
-    configPath = hass.config.path("custom_components/fordpass/" + data[CONF_USERNAME] + "_fordpass_token.txt")
-
-    vehicle = Vehicle(data[CONF_USERNAME], data[CONF_PASSWORD], data[VIN], "", 1, configPath)
+    vehicle = Vehicle(data['client_id'], data['client_secret'], data[VIN])
     test = await(hass.async_add_executor_job(vehicle.get_status))
     _LOGGER.debug("GOT SOMETHING BACK?")
     _LOGGER.debug(test)
@@ -191,26 +151,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     
 
 
-    def base64_url_encode(self, data):
-        """Encode string to base64"""
-        return urlsafe_b64encode(data).rstrip(b'=')
-
-    def generate_hash(self, code):
-        """Generate hash for login"""
-        hashengine = hashlib.sha256()
-        hashengine.update(code.encode('utf-8'))
-        return self.base64_url_encode(hashengine.digest()).decode('utf-8')
-    def validNumber(self, phone_number):
-        pattern = re.compile("^([+]\d{2})?\d{10}$", re.IGNORECASE)
-        pattern2 = re.compile("^([+]\d{2})?\d{9}$", re.IGNORECASE)
-        return pattern.match(phone_number) is not None or pattern2.match(phone_number) is not None  
-        
     async def async_step_vin(self, user_input=None):
         """Handle manual VIN entry"""
         errors = {}
         if user_input is not None:
-            _LOGGER.debug(self.login_input)
-            _LOGGER.debug(user_input)
             data = self.login_input
             data["vin"] = user_input["vin"]
             vehicle = None

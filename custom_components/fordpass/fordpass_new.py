@@ -2,13 +2,9 @@
 from os import mkdir
 from sys import exception
 
-import hashlib
 import json
 import logging
 import os
-import random
-import re
-import string
 import hashlib
 import time
 from base64 import urlsafe_b64encode
@@ -39,9 +35,6 @@ loginHeaders = {
 
 NEW_API = True
 
-BASE_URL = "https://localhost:9800"
-GUARD_URL = "https://localhost:9801"
-SSO_URL = "https://localhost:9802"
 AUTONOMIC_URL = "https://localhost:9803"
 AUTONOMIC_ACCOUNT_URL = "https://localhost:9804"
 FORD_LOGIN_URL = "https://localhost:9805"
@@ -53,12 +46,8 @@ class Vehicle:
     # Represents a Ford vehicle, with methods for status and issuing commands
 
     def __init__(
-        self, client_id, client_secret, vin, _save_token=True, config_location_=""
+        self, client_id, client_secret, vin
     ):
-        self.config_location = ""
-        self.save_token = True
-        self.username = ""
-        self.password = ""
         self.client_id = client_id
         self.client_secret = client_secret
         self.vin = vin
@@ -72,6 +61,7 @@ class Vehicle:
         adapter = HTTPAdapter(max_retries=retry)
         session.mount("http://", adapter)
         session.mount("https://", adapter)
+
         self.token_location = "custom_components/fordpass/" + client_id + "_fordpass_token.txt"
         self.cache_location = ".fordpass-cache/" + client_id + "/"
 
@@ -134,9 +124,7 @@ class Vehicle:
 
         if response.status_code == 200:
             result = response.json()
-            if self.save_token:
-                result["expiry_date"] = result["expires_on"]
-                self.write_token(result)
+            self.write_token(result)
 
             self.token = result["access_token"]
             self.refresh_token = result["refresh_token"]
@@ -154,17 +142,12 @@ class Vehicle:
         # Fetch and refresh token as needed
         # If file exists read in token file and check it's valid
         _LOGGER.debug("Fetching token")
-        if self.save_token:
-            if os.path.isfile(self.token_location):
-                data = self.read_token()
-                self.token = data["access_token"]
-                self.refresh_token = data["refresh_token"]
-                self.expires_at = data["expires_on"]
-            else:
-                data = {}
-                data["access_token"] = self.token
-                data["refresh_token"] = self.refresh_token
-                data["expires_on"] = self.expires_at
+
+        if os.path.isfile(self.token_location):
+            data = self.read_token()
+            self.token = data["access_token"]
+            self.refresh_token = data["refresh_token"]
+            self.expires_at = data["expires_on"]
         else:
             data = {}
             data["access_token"] = self.token
@@ -181,7 +164,6 @@ class Vehicle:
     def write_token(self, token):
         """Save token to file for reuse"""
         with open(self.token_location, "w", encoding="utf-8") as outfile:
-            token["expiry_date"] = token["expires_on"]
             json.dump(token, outfile)
 
     def read_token(self):
@@ -329,118 +311,12 @@ class Vehicle:
     def request_update(self, vin=""):
         """Send request to vehicle for update"""
         self.__acquire_token()
+
         if vin:
             vinnum = vin
         else:
             vinnum = self.vin
+
         status = self.__request_and_poll_command("statusRefresh", vinnum)
         return status
 
-    def __make_request(self, method, url, data, params):
-        """
-        Make a request to the given URL, passing data/params as needed
-        """
-
-        headers = {
-            **apiHeaders,
-            "auth-token": self.token,
-            "Application-Id": self.region,
-        }
-
-        return getattr(requests, method.lower())(
-            url, headers=headers, data=data, params=params
-        )
-
-    def __poll_status(self, url, command_id):
-        return
-        """
-        Poll the given URL with the given command ID until the command is completed
-        """
-        status = self.__make_request("GET", f"{url}/{command_id}", None, None)
-        result = status.json()
-        if result["status"] == 552:
-            _LOGGER.debug("Command is pending")
-            time.sleep(5)
-            return self.__poll_status(url, command_id)  # retry after 5s
-        if result["status"] == 200:
-            _LOGGER.debug("Command completed succesfully")
-            return True
-        _LOGGER.debug("Command failed")
-        return False
-
-    def __request_and_poll_command(self, command, vin=None):
-        return
-        """Send command to the new Command endpoint"""
-        self.__acquire_token()
-        headers = {
-            **apiHeaders,
-            "Application-Id": self.region,
-            "authorization": f"Bearer {self.auto_token}"
-        }
-
-        data = {
-            "properties": {},
-            "tags": {},
-            "type": command,
-            "wakeUp": True
-        }
-        if vin is None:
-            r = session.post(
-                f"{AUTONOMIC_URL}/command/vehicles/{self.vin}/commands",
-                data=json.dumps(data),
-                headers=headers
-            )
-        else:
-            r = session.post(
-                f"{AUTONOMIC_URL}/command/vehicles/{self.vin}/commands",
-                data=json.dumps(data),
-                headers=headers
-            )
-
-        _LOGGER.debug("Testing command")
-        _LOGGER.debug(r.status_code)
-        _LOGGER.debug(r.text)
-        if r.status_code == 201:
-            # New code to hanble checking states table from vehicle data
-            response = r.json()
-            command_id = response["id"]
-            current_status = response["currentStatus"]
-            i = 1
-            while i < 14:
-                # Check status every 10 seconds for 90 seconds until command completes or time expires
-                status = self.status()
-                _LOGGER.debug("STATUS")
-                _LOGGER.debug(status)
-
-                if "states" in status:
-                    _LOGGER.debug("States located")
-                    if f"{command}Command" in status["states"]:
-                        _LOGGER.debug("Found command")
-                        _LOGGER.debug(status["states"][f"{command}Command"]["commandId"])
-                        if status["states"][f"{command}Command"]["commandId"] == command_id:
-                            _LOGGER.debug("Making progress")
-                            _LOGGER.debug(status["states"][f"{command}Command"])
-                            if status["states"][f"{command}Command"]["value"]["toState"] == "success":
-                                _LOGGER.debug("Command succeeded")
-                                return True
-                            if status["states"][f"{command}Command"]["value"]["toState"] == "expired":
-                                _LOGGER.debug("Command expired")
-                                return False
-                i += 1
-                _LOGGER.debug("Looping again")
-                time.sleep(10)
-            #time.sleep(90)
-            return False
-        return False
-
-    def __request_and_poll(self, method, url):
-        """Poll API until status code is reached, locking + remote start"""
-        self.__acquire_token()
-        command = self.__make_request(method, url, None, None)
-
-        if command.status_code == 200:
-            result = command.json()
-            if "commandId" in result:
-                return self.__poll_status(url, result["commandId"])
-            return False
-        return False

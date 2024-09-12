@@ -19,10 +19,8 @@ from .const import (
     CONF_PRESSURE_UNIT,
     DEFAULT_DISTANCE_UNIT,
     DEFAULT_PRESSURE_UNIT,
-    DEFAULT_REGION,
     DOMAIN,
     MANUFACTURER,
-    REGION,
     VEHICLE,
     VIN,
     UPDATE_INTERVAL,
@@ -183,7 +181,7 @@ class FordPassDataUpdateCoordinator(DataUpdateCoordinator):
         self._hass = hass
         self.vin = vin
         config_path = hass.config.path("custom_components/fordpass/" + client_id + "_fordpass_token.txt")
-        self.vehicle = Vehicle(client_id, client_secret, vin, save_token, config_path)
+        self.vehicle = Vehicle(client_id, client_secret, vin)
         self._available = True
 
         super().__init__(
