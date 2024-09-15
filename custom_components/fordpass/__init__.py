@@ -202,7 +202,6 @@ class FordPassDataUpdateCoordinator(DataUpdateCoordinator):
                 if not data:
                     data = {}
 
-                _LOGGER.debug(data)
                 # If data has now been fetched but was previously unavailable, log and reset
                 if not self._available:
                     _LOGGER.info("Restored connection to FordPass for %s", self.vin)
@@ -246,7 +245,6 @@ class FordPassEntity(CoordinatorEntity):
         if self._device_id is None:
             return None
 
-        _LOGGER.debug(self.coordinator.data)
         model = "unknown"
         if self.coordinator.data is not None:
             vehicle = self.coordinator.data

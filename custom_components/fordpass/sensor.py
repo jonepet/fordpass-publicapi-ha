@@ -82,8 +82,6 @@ class CarSensor(
     def get_value(self, ftype):
         """Get sensor value and attributes from coordinator data"""
 
-        _LOGGER.debug(self.coordinator.data)
-
         self.data = self.coordinator.data
         self.metrics = self.data.get("metrics", {})
         self.units = self.coordinator.hass.config.units
@@ -91,7 +89,6 @@ class CarSensor(
         if ftype == "state":
             if self.sensor == "odometer":
                 odometer = self.metrics.get("odometer", None)
-                _LOGGER.debug(odometer);
 
                 if odometer is not None:
                     return round(odometer)

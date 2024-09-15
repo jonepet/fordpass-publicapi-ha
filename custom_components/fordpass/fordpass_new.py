@@ -1,6 +1,4 @@
 """Fordpass API Library"""
-from os import mkdir
-from sys import exception
 
 import json
 import logging
@@ -55,12 +53,12 @@ class Vehicle:
         self.expires = None
         self.expires_at = None
         self.refresh_token = None
-        self.auto_token = None
-        self.auto_expires_at = None
         retry = Retry(connect=3, backoff_factor=0.5)
         adapter = HTTPAdapter(max_retries=retry)
         session.mount("http://", adapter)
         session.mount("https://", adapter)
+
+        self.application_id = "AFDC085B-377A-4351-B23E-5E1D35FB3700"
 
         self.token_location = "custom_components/fordpass/" + client_id + "_fordpass_token.txt"
         self.cache_location = ".fordpass-cache/" + client_id + "/"
@@ -207,46 +205,69 @@ class Vehicle:
 
             return v
 
-        raise exception("No result from v3 vehicle fetch, and no cached result available")
+        raise Exception("No result from v3 vehicle fetch, and no cached result available")
 
     def get_json_with_cache(self, url):
+        try:
+            response = self.get_for_json(url)
+
+            if response:
+                try:
+                    _LOGGER.debug("Writing cached result for " + url + " to cache")
+                    self.write_json_cache(url, response)
+                except:
+                    """Ignore"""
+
+                return response
+        except requests.exceptions.HTTPError as error:
+            _LOGGER.debug("Response code " + error.status_code + " for url " + url)
+
+            if error.status_code == 429:
+                try:
+                    _LOGGER.debug("Reading cached result for " + url + " from cache")
+                    cached = self.read_json_cache(url)
+
+                    if (cached):
+                        return cached
+                except:
+                    raise error
+
+            _LOGGER.debug("No cached result for " + url)
+            raise error
+        return None
+
+    def get_for_json(self, url, retry=5):
         self.__acquire_token()
 
         headers = {
             **apiHeaders,
-            "application-id": "AFDC085B-377A-4351-B23E-5E1D35FB3700",
+            "application-id": self.application_id,
             "authorization": f"Bearer {self.token}"
         }
-
-        try:
-            cached = self.read_json_cache(url)
-        except:
-            cached = None
 
         response = session.get(
             url,
             headers=headers
         )
 
+        if 500 <= response.status_code <= 503:
+            if retry <= 0:
+                response.raise_for_status()
+
+            time.sleep(1)
+
+            return self.get_for_json(url, retry - 1)
+
+
         if 200 <= response.status_code < 300:
 
             json_response = response.json()
 
             if json_response:
-                try:
-                    self.write_json_cache(url, json_response)
-                except:
-                    """Ignore"""
-
                 return json_response
 
-        if response.status_code == 429:
-            if not cached:
-                response.raise_for_status()
-
-            return cached
-
         response.raise_for_status()
+
 
     def vehicles(self):
         """Get vehicle list from account"""
@@ -287,18 +308,19 @@ class Vehicle:
         """
         Issue a start command to the engine
         """
-        return self.__request_and_poll_command("remoteStart")
+        return self.__request_and_poll_command("startEngine")
 
     def stop(self):
         """
         Issue a stop command to the engine
         """
-        return self.__request_and_poll_command("cancelRemoteStart")
+        return self.__request_and_poll_command("stopEngine")
 
     def lock(self):
         """
         Issue a lock command to the doors
         """
+
         return self.__request_and_poll_command("lock")
 
     def unlock(self):
@@ -308,15 +330,77 @@ class Vehicle:
         return self.__request_and_poll_command("unlock")
 
 
-    def request_update(self, vin=""):
-        """Send request to vehicle for update"""
+    def __make_request(self, method, url, data, params):
+        """
+        Make a request to the given URL, passing data/params as needed
+        """
+
+        headers = {
+            **apiHeaders,
+            "auth-token": self.token,
+            "Application-Id": self.region,
+        }
+
+        return getattr(requests, method.lower())(
+            url, headers=headers, data=data, params=params
+        )
+
+
+    def post_for_json(self, url, data):
+        self.__acquire_token()
+        headers = {
+            **apiHeaders,
+            "Application-Id": self.application_id,
+            "authorization": f"Bearer {self.token}"
+        }
+
+        r = session.post(
+            url,
+            headers=headers,
+            data=data
+        )
+
+        if 200 <= r.status_code < 300:
+            return r.json()
+
+        r.raise_for_status()
+
+
+    def __request_and_poll_command(self, command):
+        """Send command to the new Command endpoint"""
         self.__acquire_token()
 
-        if vin:
-            vinnum = vin
-        else:
-            vinnum = self.vin
+        response = self.post_for_json(f"https://api.mps.ford.com/api/fordconnect/v1/vehicles/{self.vin}/{command}", {})
 
-        status = self.__request_and_poll_command("statusRefresh", vinnum)
-        return status
+        command_id = response["commandId"]
 
+        _LOGGER.debug(command_id)
+
+        if command_id is None:
+            return False
+
+        return self.__poll_command_status_and_refresh(command_id)
+
+    def __poll_command_status_and_refresh(self, command_id):
+        i = 1
+
+        while i < 14:
+            # Check status every 10 seconds for 90 seconds until command completes or time expires
+            status_response = self.get_for_json(f"https://api.mps.ford.com/api/fordconnect/v1/vehicles/{self.vin}/statusrefresh/{command_id}")
+
+            _LOGGER.debug(status_response)
+
+            if status_response is not None and status_response["status"] is not None:
+                status = status_response["commandStatus"]
+
+                if status == "COMPLETED":
+                    self.status()
+                    return True
+
+                if status == "FAILED":
+                    return False
+
+            i += 1
+            _LOGGER.debug("Looping again")
+            time.sleep(10)
+        return False
