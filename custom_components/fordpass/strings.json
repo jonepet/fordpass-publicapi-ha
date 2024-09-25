@@ -4,20 +4,21 @@
     "step": {
             "token": {
                 "title": "Setup Token",
-                "description": "Please enter the full token from the Location: header once logging in using the URL above, the token should look like this '@fordapp://userauthorized/?code=eyJraWQiOiItSm9pdi1OX1ktU' . Please also ensure you include the fordpass:// part",
+                "description": "Enter full URL redirected to after authorizing access to vehicle as described in the fordconnect API getting started document. URL starts with https://localhost:3000 ",
                 "data": {
                     "url": "URL",
-                    "tokenstr": "Token"
+                    "tokenstr": "Token URL"
                 }
             },
       "user": {
-        "data": {
-          "username": "FordPass Username (Email)",
-          "password": "FordPass Password",
-          "region": "FordPass Region"
-        },
-        "data_description": {
-          "username": "If using a mobile instead of email please enter your number include + and the country code (+99123456789)"
+        "user": {
+          "data": {
+              "client_id": "FordConnect API  Client ID",
+              "client_secret": "FordConnect API Client secret"
+          },
+          "data_description": {
+              "username": "Specify client ID and client secret provided from Ford developer account"
+          }
         }
       },
       "vehicle": {
