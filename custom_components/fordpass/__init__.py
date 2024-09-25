@@ -190,7 +190,7 @@ class FordPassDataUpdateCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from FordPass."""
         try:
-            async with async_timeout.timeout(120):
+            async with async_timeout.timeout(600):
                 data = (await self._hass.async_add_executor_job(
                     self.vehicle.status  # Fetch new status
                 ))

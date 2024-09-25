@@ -216,9 +216,9 @@ class Vehicle:
 
         raise Exception("No result from v3 vehicle fetch, and no cached result available")
 
-    def get_json_with_cache(self, url):
+    def get_json_with_cache(self, url, timeout=30):
         try:
-            response = self.get_for_json(url)
+            response = self.get_for_json(url, timeout)
 
             if response:
                 try:
@@ -245,7 +245,7 @@ class Vehicle:
             raise error
         return None
 
-    def get_for_json(self, url, retry=2):
+    def get_for_json(self, url, retry=2, timeout=30):
         self.__acquire_token()
 
         _LOGGER.debug("Request for " + url + " start")
@@ -260,14 +260,14 @@ class Vehicle:
             response = session.get(
                 url,
                 headers=headers,
-                timeout=30
+                timeout=timeout
             )
         except requests.Timeout as error:
             _LOGGER.info("Timeout on request for " + url)
             if retry <= 0:
                 raise error
 
-            return self.get_for_json(url, retry - 1)
+            return self.get_for_json(url, retry - 1, timeout)
 
         if 500 <= response.status_code <= 503:
             _LOGGER.debug("Request for " + url + ": 500 error")
@@ -276,7 +276,7 @@ class Vehicle:
 
             time.sleep(1)
 
-            return self.get_for_json(url, retry - 1)
+            return self.get_for_json(url, retry - 1, timeout)
 
 
         if 200 <= response.status_code < 300:
@@ -295,7 +295,7 @@ class Vehicle:
     def vehicles(self):
         """Get vehicle list from account"""
 
-        response = self.get_json_with_cache("https://api.mps.ford.com/api/fordconnect/v2/vehicles")
+        response = self.get_json_with_cache("https://api.mps.ford.com/api/fordconnect/v2/vehicles", timeout=300)
         return response["vehicles"]
 
     def get_json_cache_filename(self, url):
