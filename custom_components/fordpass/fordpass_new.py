@@ -177,7 +177,7 @@ class Vehicle:
                 return token
 
     def request_update(self):
-        status = self.__request_and_poll_command("status")
+        status = self.__request_and_poll_command("status") and self.__request_and_poll_command("location")
 
         if status:
             self.status()
@@ -245,8 +245,10 @@ class Vehicle:
             raise error
         return None
 
-    def get_for_json(self, url, retry=5):
+    def get_for_json(self, url, retry=2):
         self.__acquire_token()
+
+        _LOGGER.debug("Request for " + url + " start")
 
         headers = {
             **apiHeaders,
@@ -254,13 +256,21 @@ class Vehicle:
             "authorization": f"Bearer {self.token}"
         }
 
-        response = session.get(
-            url,
-            headers=headers,
-            timeout=30
-        )
+        try:
+            response = session.get(
+                url,
+                headers=headers,
+                timeout=30
+            )
+        except requests.Timeout as error:
+            _LOGGER.info("Timeout on request for " + url)
+            if retry <= 0:
+                raise error
+
+            return self.get_for_json(url, retry - 1)
 
         if 500 <= response.status_code <= 503:
+            _LOGGER.debug("Request for " + url + ": 500 error")
             if retry <= 0:
                 response.raise_for_status()
 
@@ -273,9 +283,12 @@ class Vehicle:
 
             json_response = response.json()
 
+            _LOGGER.debug("Request for " + url + ": ok")
+
             if json_response:
                 return json_response
 
+        _LOGGER.debug("Request for " + url + ": error")
         response.raise_for_status()
 
 
@@ -389,14 +402,18 @@ class Vehicle:
         if command_id is None:
             return False
 
-        return self.__poll_command_status_and_refresh(command_id)
+        refresh_command_name = command
+        if command == "status":
+            refresh_command_name = "statusrefresh"
 
-    def __poll_command_status_and_refresh(self, command_id):
+        return self.__poll_command_status_and_refresh(refresh_command_name, command_id)
+
+    def __poll_command_status_and_refresh(self, command, command_id):
         i = 1
 
         while i < 14:
             # Check status every 10 seconds for 90 seconds until command completes or time expires
-            status_response = self.get_for_json(f"https://api.mps.ford.com/api/fordconnect/v1/vehicles/{self.vin}/statusrefresh/{command_id}")
+            status_response = self.get_for_json(f"https://api.mps.ford.com/api/fordconnect/v1/vehicles/{self.vin}/{command}/{command_id}")
 
             _LOGGER.debug(status_response)
 
