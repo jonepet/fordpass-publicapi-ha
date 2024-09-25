@@ -53,8 +53,7 @@ class Vehicle:
         self.expires = None
         self.expires_at = None
         self.refresh_token = None
-        retry = Retry(connect=3, backoff_factor=0.5)
-        adapter = HTTPAdapter(max_retries=retry)
+        adapter = HTTPAdapter()
         session.mount("http://", adapter)
         session.mount("https://", adapter)
 
@@ -91,7 +90,8 @@ class Vehicle:
                 f"https://dah2vb2cprod.b2clogin.com/914d88b1-3523-4bf6-9be4-1b96b4f6f919/oauth2/v2.0/token?p=B2C_1A_signup_signin_common",
                 headers=headers,
                 data=data,
-                verify=True
+                verify=True,
+                timeout=30
             )
 
         self.write_token(req.json())
@@ -176,6 +176,15 @@ class Vehicle:
                 token = json.load(token_file)
                 return token
 
+    def request_update(self):
+        status = self.__request_and_poll_command("status")
+
+        if status:
+            self.status()
+
+        return status
+
+
     def clear_token(self):
         """Clear tokens from config directory"""
         if os.path.isfile("/tmp/fordpass_token.txt"):
@@ -247,7 +256,8 @@ class Vehicle:
 
         response = session.get(
             url,
-            headers=headers
+            headers=headers,
+            timeout=30
         )
 
         if 500 <= response.status_code <= 503:

@@ -150,13 +150,9 @@ async def options_update_listener(hass: HomeAssistant, entry: ConfigEntry):
 def refresh_status(hass, service, coordinator):
     """Get latest vehicle status from vehicle, actively polls the car"""
     _LOGGER.debug("Running Service")
-    vin = service.data.get("vin", "")
-    status = coordinator.vehicle.request_update(vin)
-    if status == 401:
-        _LOGGER.debug("Invalid VIN")
-    elif status == 200:
+    status = coordinator.vehicle.request_update()
+    if status == 200:
         _LOGGER.debug("Refresh Sent")
-
 
 def clear_tokens(hass, service, coordinator):
     """Clear the token file in config directory, only use in emergency"""
