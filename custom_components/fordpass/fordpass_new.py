@@ -200,7 +200,7 @@ class Vehicle:
 
         _LOGGER.debug("Fetch vehicle status")
 
-        result = self.get_json_with_cache(f"https://api.mps.ford.com/api/fordconnect/v3/vehicles/{self.vin}")
+        result = self.get_json_with_cache(f"https://api.mps.ford.com/api/fordconnect/v3/vehicles/{self.vin}", timeout=300)
 
         if result:
 

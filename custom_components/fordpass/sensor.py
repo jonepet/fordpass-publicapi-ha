@@ -110,7 +110,7 @@ class CarSensor(
                     return round(soc.get("value", 0))
 
                 return None
-            if self.sensor == "tirePressure":
+            if self.sensor == "tirePressureWarning":
                 return self.metrics.get("tirePressureWarning", "Unsupported")
 
             if self.sensor == "gps":
@@ -122,7 +122,7 @@ class CarSensor(
             if self.sensor == "ignitionStatus":
                 return self.metrics.get("ignitionStatus", {}).get("value", "Unsupported")
 
-            if self.sensor == "firmwareUpgInProgress":
+            if self.sensor == "firmwareUpgradeInProgress":
                 return self.metrics.get("firmwareUpgradeInProgress", "Unsupported")
 
             if self.sensor == "deepSleepInProgress":
@@ -158,7 +158,7 @@ class CarSensor(
                 return "Active" if countdown_timer > 0 else "Inactive"
 
             if self.sensor == "speed":
-                return self.data.get("vehicleLocation", {}).get("speed", "Unsupported")
+                return self.metrics.get("vehicleLocation", {}).get("speed", "Unsupported")
 
             if self.sensor == "deepSleep":
                 return self.metrics.get("deepSleepStatus", "Unsupported")
@@ -169,26 +169,32 @@ class CarSensor(
         if ftype == "attribute":
             if self.sensor == "odometer":
                 return {}
+            if self.sensor == "hvBattery":
+                return {
+                    "distanceToEmpty": self.metrics.get("batteryChargeLevel", {}).get("distanceToEmpty", None)
+                }
             if self.sensor == "alarm":
-                return self.data.get("alarmStatus", {})
+                return self.metrics.get("alarmStatus", {})
             if self.sensor == "ignitionStatus":
-                return self.data.get("ignitionStatus", {})
+                return self.metrics.get("ignitionStatus", {})
             if self.sensor == "firmwareUpgradeInProgress":
-                return self.data.get("firmwareUpgradeInProgress", {})
+                return self.metrics.get("firmwareUpgradeInProgress", {})
             if self.sensor == "deepSleep":
                 return None
             if self.sensor == "doorStatus":
                 doors = {}
-                for value in self.data.get(self.sensor, []):
-                    if "vehicleSide" in value:
+                for value in self.metrics.get(self.sensor, []):
+                    if "vehicleDoor" in value:
                         if value['vehicleDoor'] == "UNSPECIFIED_FRONT":
-                            doors[value['vehicleSide']] = value['value']
+                            doors["FRONT_" + value['vehicleOccupantRole']] = value.get('value', None)
                         else:
-                            doors[value['vehicleDoor']] = value['value']
+                            doors[value['vehicleDoor']] = value.get('value', None)
                     else:
-                        doors[value["vehicleDoor"]] = value['value']
+                        doors[value["vehicleDoor"]] = value.get('value', None)
+
                 if "hoodStatus" in self.data:
                     doors["HOOD"] = self.data["hoodStatus"]["value"]
+
                 return doors or None
             if self.sensor == "windowPosition":
                 windows = {}

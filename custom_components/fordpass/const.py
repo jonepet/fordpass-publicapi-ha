@@ -30,7 +30,7 @@ SENSORS = {
     "hvBattery": {"icon": "mdi:battery", "api_key": ["batteryChargeLevel"], "measurement": "%"},
     "hvChargingStatus": {"icon": "mdi:power-plug-battery", "api_key": ["chargingStatus"]},
     "hvPlugStatus": {"icon": "mdi:power-plug-outline", "api_key": ["plugStatus"]},
-    "tirePressure": {"icon": "mdi:car-tire-alert", "api_key": "tirePressureAlert"},
+    "tirePressureWarning": {"icon": "mdi:car-tire-alert", "api_key": "tirePressureWarning" },
     "alarm": {"icon": "mdi:bell", "api_key": "alarmStatus"},
     "ignitionStatus": {"icon": "hass:power", "api_key": "ignitionStatus"},
     "doorStatus": {"icon": "mdi:car-door", "api_key": "doorStatus"},
@@ -39,6 +39,8 @@ SENSORS = {
     "speed": {"icon": "mdi:speedometer", "device_class": "speed", "state_class": "measurement", "api_key": "vehicleLocation", "measurement": "km/h"},
     "deepSleep": {"icon": "mdi:power-sleep", "name": "Deep Sleep Mode Active", "api_key": "commandPreclusion", "api_class": "states"},
     "remoteStartStatus": {"icon": "mdi:remote", "api_key": "remoteStartCountdownTimer"},
+    "firmwareUpgradeInProgress": {"icon": "mdi:car-cog", "api_key": "firmwareUpgradeInProgress" },
+    "deepSleepInProgress": {"icon": "mdi:sleep", "api_key": "deepSleepInProgress" }
 }
 
 SWITCHES = {
